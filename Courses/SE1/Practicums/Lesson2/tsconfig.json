@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "module": "commonjs",
+        "target": "es3",
+        "strict": true,
+        "outDir": "bin"
+    },
+    "exclude": [
+        "node_modules"
+    ]
+}

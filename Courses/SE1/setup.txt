@@ -1,0 +1,11 @@
+1. npm init //initialize node package manager and creates package.json
+2. yarn add -D typescript //add dependencies for typescript (compiler)
+3. yarn install //install the dependencies
+4. node_modules/.bin/tsc --init //initialize the compiler
+5. open package.json and enter the following scripts
+	"scripts": {
+    "build": "tsc -w -pretty",
+    "exec": "node build/test.js"
+  }
+6. open tsconfig.json, uncomment the parameter outDir 
+and modify "outDir": "./build"

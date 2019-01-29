@@ -1,0 +1,17 @@
+{
+  "name": "impera",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc -w -pretty",
+    "run": "node build/Impera/StateMonad.js",
+    "runImpera": "node build/Impera/Impera.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "immutable": "^3.8.2",
+    "typescript": "^2.7.2"
+  }
+}
