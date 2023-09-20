@@ -8,12 +8,11 @@ Thanks to this project, students will understand how to apply advanced patterns 
 
 ### Learning goals
 The project has the following learning goals:
-1. (`IComponent<o>`) define a functorial React component
-1. (`fromJSX`) define the monadic constructor from JSX elements
-1. (`fromPromise`) define the monadic constructor from a `Promise`
-1. (`race`) define the monoidal sum
-1. (`all`) define the monoidal product
-1. (`apply`) define a small web application in React that uses all the above learning components
+1. (MON) use functors
+1. (NAT) use natural transformations
+1. (BIND) use monadic/monoidal bindings
+1. (SUM) use monadic/monoidal sums
+1. (MUL) define monadic/monoidal product
 
 The course, and therefore also the learning goals, are limited to **referentially transparent**, **type-safe** programs written in TypeScript.
 
