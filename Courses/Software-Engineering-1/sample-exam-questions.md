@@ -46,7 +46,7 @@ What is the type of mapOption(mapOption(incr))?
 What is the type of mapOption(mapList(gtz))?
 What is the type of mapCountainer(mapOption(mapList(gtz)))?
 
-# Invoking composed map functions
+<!-- # Invoking composed map functions
 Invoking a map function with f.then(g)
 Invoking map functions with composed functions.
 Invoking composed map functions with composed functions.
@@ -54,7 +54,7 @@ Invoking monoid operations.
 Invoking functor units.
 Invoking functor joins.
 Invoking functor joins over units.
-Defining and invoking a type safe instance of a composite functor
+Defining and invoking a type safe instance of a composite functor -->
 
 
 # Defining fun
