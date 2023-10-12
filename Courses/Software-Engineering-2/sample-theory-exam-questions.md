@@ -9,7 +9,7 @@ Each question is worth one point. Answers are either fully correct according to 
 1. Given two arrows
 `f : a -> b`, `g : b -> c`
 a category always supports an arrow
-`f;g : __ -> __``
+`f;g : __ -> __`
 
 1. Given any object
 `a`
