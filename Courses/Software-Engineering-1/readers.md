@@ -336,6 +336,56 @@ The uniqueness of the identity function is its behavior with respect to composit
 
 The identity function is thus the _neutral element_ of composition, that is it behaves similarly to $0$ with respect to addition, and to $1$ with respect to product: $0 + x = x + 0 = x$ and $1 \times x = x \times 1 = x$, no matter what $x$ was.
 
+### Updaters
+A special variation of `Fun` operates on a single type parameter.
+
+...let's just define it as a type alias of `Fun`...
+
+...used in, for example, React...
+
+...horizontal composition...
+
+...vertical composition...
+
+```ts
+type Class = {
+  teacher:Person,
+  students:Map<Person["id"], Person>,
+}
+
+type Person = {
+  id:string,
+  name:string,
+  age:number
+}
+
+const Class = {
+  Updaters:{
+    teacher:...
+    students:...
+    student:...
+  }
+}
+
+const Person = {
+  Updaters:{
+    name:(_:Updater<Person["name"]>) : Updater<Person> => ...,
+    age:(_:Updater<Person["age"]>) : Updater<Person> => ...,
+  }
+}
+```
+
+We can also go for a flourish, and define `Map.Updaters.update` to update a single element and therefore make the `Class.Updaters.student` updater more elegant:
+
+```ts
+const Map = {
+  Updaters:{
+    update:<k,v>(k:k, u:Updater<v>) : Updater<Map<k,v>> => ...
+  }
+}
+```
+
+
 
 ## Referential transparency
 
