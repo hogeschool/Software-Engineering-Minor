@@ -49,8 +49,8 @@ console.log(tmp(c_s));
 const map_Id = (f) => f;
 const Option = {
     Default: {
-        Empty: () => ({ kind: "empty" }),
-        Full: (content) => ({ kind: "full", content: content }),
+        Empty: () => ({ kind: "empty", then: function (f) { return then_Option(this, f); } }),
+        Full: (content) => ({ kind: "full", content: content, then: function (f) { return then_Option(this, f); } }),
     }
 };
 const map_Option = (f) => Fun(input => input.kind == "empty" ? Option.Default.Empty() : Option.Default.Full(f(input.content)));
@@ -71,4 +71,35 @@ const m1 = map(Functor("Array"));
 const m2 = map(Then("Countainer", Functor("Option")))(incr.then(gtz));
 const AACO = Then("Array", Then("Array", Then("Countainer", Functor("Option"))));
 const AAO = Then("Array", Then("Array", Functor("Option")));
-const m3 = map(AACO)(incr);
+const m3 = map(AACO)(incr.then(gtz));
+const associate = () => Fun(([a, [b, c]]) => [[a, b], c]);
+const map2_Pair = (l, r) => Fun(p => [l(p[0]), r(p[1])]);
+const mkPair = (l, r) => Fun(c => [l(c), r(c)]);
+const stringPlus = {
+    join: Fun(([s1, s2]) => s1 + s2),
+    getZero: Fun((_) => "")
+};
+const numberPlus = {
+    join: Fun(([s1, s2]) => s1 + s2),
+    getZero: Fun((_) => 0)
+};
+// const borkedMonoid : Monoid<number> = {
+//   join:Fun(([s1,s2]:Pair<number,number>) => s1+s2),
+//   getZero:Fun((_:Unit) => 1)
+// }
+const identityLaw = (m, samples) => {
+    const pointlessPath1 = mkPair(m.getZero, id()).then(m.join);
+    const pointlessPath2 = mkPair(id(), m.getZero).then(m.join);
+    samples.forEach(s => {
+        if (s != pointlessPath1(s))
+            console.error("m is not a monoid!!!");
+        if (s != pointlessPath2(s))
+            console.error("m is not a monoid!!!");
+    });
+};
+const OptionMonad = {
+    unit: () => Fun((Option.Default.Full)),
+    join: () => Fun(o2 => o2.kind == "empty" ? Option.Default.Empty() : o2.content.kind == "empty" ? Option.Default.Empty() : Option.Default.Full(o2.content.content))
+};
+const then_Option = (p, f) => map_Option(Fun(f)).then(OptionMonad.join())(p);
+const maybeAdd = (x, y) => x.then(x_v => y.then(y_v => Option.Default.Full(x_v + y_v)));

@@ -202,7 +202,7 @@ type Fun<a,b> = { (i:a):b }
 Let us also define a lifting operator which takes as input a regular function and returns our (not yet, soon to be) enriched function definition:
 
 ```
-let Fun = function<a,b>(f:(_:a)=>b) : Fun<a,b> { return { f:f } }
+let Fun = function<a,b>(f:(_:a)=>b) : Fun<a,b> { return f }
 ```
 
 At this point we can move on to some basic examples. 
@@ -277,7 +277,7 @@ type Fun<a,b> = { f:(i:a) => b, then:<c>(g:Fun<b,c>) => Fun<a,c> }
 Of course, creating a new function must also define `then`. Here we use the implicit binding of `this` to our advantage:
 
 ```
-let Fun = function<a,b>(f:(_:a)=>b)) : Fun<a,b> { 
+let Fun = function<a,b>(f:(_:a)=>b) : Fun<a,b> { 
   return { 
     f:f,
     then:function<c>(this:Fun<a,b>, g:Fun<b,c>) : Fun<a,c> { 

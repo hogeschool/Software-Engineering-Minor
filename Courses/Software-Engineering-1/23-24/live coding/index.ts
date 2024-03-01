@@ -110,11 +110,11 @@ map_F = <a,b>(f:Fun<a,b>) : Fun<F<a>, F<b>>
 type Id<a> = a
 const map_Id = <a,b>(f:Fun<a,b>) : Fun<Id<a>, Id<b>> => f
 
-type Option<a> = { kind:"empty" } | { kind:"full", content:a }
+type Option<a> = ({ kind:"empty" } | { kind:"full", content:a }) & { then:<b>(f:(_:a) => Option<b>) => Option<b> }
 const Option = { 
   Default:{
-    Empty:<a>() : Option<a> => ({ kind:"empty" }),
-    Full:<a>(content:a) : Option<a> => ({ kind:"full", content:content }),
+    Empty:<a>() : Option<a> => ({ kind:"empty", then:function<b>(this:Option<a>, f:(_:a) => Option<b>) { return then_Option(this, f) } }),
+    Full:<a>(content:a) : Option<a> => ({ kind:"full", content:content, then:function<b>(this:Option<a>, f:(_:a) => Option<b>) { return then_Option(this, f) } }),
   }
 }
 const map_Option = <a,b>(f:Fun<a,b>) : Fun<Option<a>, Option<b>> =>
@@ -147,7 +147,7 @@ let map_FG = <a,b>(f:Fun<a,b>) : Fun<FG<a>, FG<b>> => map_F(map_G(f))
 is also a functor
 */
 
-type Unit = null
+type Unit = {}
 type Functors<a> = {
   Id:Id<a>,
   Array:Array<a>,
@@ -192,3 +192,128 @@ const AAO = Then("Array", Then("Array", Functor("Option")))
 const m3 = map(AACO)(incr.then(gtz))
 
 
+/*
+Monoids
+
+number, +, 0
+0 is the identity of +
+x + 0 == 0 + x == x
+(fun x => x + 0) == id == (fun x => 0 + x)
+associativity
+(a + b) + c == a + (b + c) == a + b + c
+
+
+number, *, 1
+1 is the identity of *
+x * 1 == 1 * x == x
+(fun x => x * 1) == id == (fun x => 1 * x)
+associativity
+(a * b) * c == a * (b * c) == a * b * c
+
+
+string, +, ""
+"" is the identity of +
+x + "" == x == "" + x
+(a + b) + c == a + (b + c) == a + b + c
+
+
+Array<a>, concat, []
+[] is the identity of concat
+x.concat([]) == x == [].concat(x)
+(a.concat(b)).concat(c) == a.concat(b.concat(c))
+
+
+- we have a type T
+- we have a composition operation <+> : (T, T) => T
+- we have an identity element e:T
+- the following must hold for (T,<+>,e) to be a monoid:
+  - a <+> e == e <+> a == a    for each a in T
+  - (a <+> b) <+> c == a <+> (b <+> c) == a <+> b <+> c    for each a, b, and c in T
+
+
+- we have a type T
+- we have a composition operation join : Fun<Pair<T, T>, T>
+- we have an identity element getZero:Fun<Unit,T>
+- the following must hold for (T,<+>,e) to be a monoid:
+  - join([a, getZero()]) == join([getZero(), a]) == a    for each a in T
+    - fun a => join([a, getZero()]) == id == fun a => join([getZero(), a])
+    - mkPair(getZero, id).then(join) == id
+  - join(join(a, b), c) == join(a, join(b, c))    for each a, b, and c in T
+    - map2_Pair(id<string>(), stringPlus.join).then(stringPlus.join) == associate<string,string,string>().then(map2_Pair(stringPlus.join, id<string>()).then(stringPlus.join))
+*/
+
+
+
+type Pair<a,b> = [a,b]
+
+const associate = <a,b,c>() : Fun<Pair<a,Pair<b,c>>,Pair<Pair<a,b>,c>> => Fun(([a,[b,c]]) => [[a,b],c])
+const map2_Pair = <a,b,a1,b1>(l:Fun<a,a1>, r:Fun<b,b1>) : Fun<Pair<a,b>,Pair<a1,b1>> => Fun(p => [l(p[0]), r(p[1])])
+const mkPair = <c,a,b>(l:Fun<c,a>, r:Fun<c,b>) : Fun<c,Pair<a,b>> => Fun(c => [l(c), r(c)])
+
+
+type Monoid<T> = { join:Fun<Pair<T, T>, T>, getZero:Fun<Unit,T> }
+
+const stringPlus : Monoid<string> = {
+  join:Fun(([s1,s2]:Pair<string,string>) => s1+s2),
+  getZero:Fun((_:Unit) => "")
+}
+
+const numberPlus : Monoid<number> = {
+  join:Fun(([s1,s2]:Pair<number,number>) => s1+s2),
+  getZero:Fun((_:Unit) => 0)
+}
+
+// const borkedMonoid : Monoid<number> = {
+//   join:Fun(([s1,s2]:Pair<number,number>) => s1+s2),
+//   getZero:Fun((_:Unit) => 1)
+// }
+
+const identityLaw = <T extends {}>(m:Monoid<T>, samples:Array<T>) => {
+  const pointlessPath1 = mkPair(m.getZero, id<T>()).then(m.join)
+  const pointlessPath2 = mkPair(id<T>(), m.getZero).then(m.join)
+  samples.forEach(s => {
+    if (s != pointlessPath1(s)) console.error("m is not a monoid!!!")
+    if (s != pointlessPath2(s)) console.error("m is not a monoid!!!")
+  })
+}
+
+// identityLaw(stringPlus, ["a", "abc", "", "abcd"])
+
+// // const pp1:Pair<string, Pair<string, string>> = ["a",["b","c"]]
+// // const pp2:Pair<Pair<string, string>, string> = [["a","b"],"c"]
+// const f1 = map2_Pair(id<number>(), numberPlus.join).then(numberPlus.join)
+// const f2 = associate<number,number,number>().then(map2_Pair(numberPlus.join, id<number>()).then(numberPlus.join))
+
+
+/*
+- we have a functor F (type F<a> = ..., map_F : Fun<a,b> => Fun<F<a>,F<b>>)
+- we have an identity element unit<a>:Fun<Id<a>,F<a>> == Fun<a,F<a>>
+- we have a composition operation join : Fun<F<F<a>>, F<a>>
+- the following must hold for (T,<+>,e) to be a monoid:
+  - F<a> -> F<F<a>> -> F<a> == id
+    - unit<F<a>>.then(join) == id == map_F<a,F<a>>(unit).then(join) == id
+  - F<F<F<a>>> -> F<F<a>> -> F<a>
+    - join.then(join) == map_F(join).then(join)
+*/
+
+
+// Monoidal functors are just MONADS
+type Monad<F> = {
+  unit:<a>() => Fun<Apply<Functor<"Id">, a>, Apply<F,a>>,
+  join:<a>() => Fun<Apply<F,Apply<F,a>>, Apply<F,a>>
+}
+const OptionMonad : Monad<Functor<"Option">> = {
+  unit:<a>() => Fun(Option.Default.Full<a>),
+  join:<a>() => Fun<Option<Option<a>>, Option<a>>(o2 => o2.kind == "empty" ? Option.Default.Empty() : o2.content.kind == "empty" ? Option.Default.Empty() : Option.Default.Full(o2.content.content))
+}
+
+const then_Option = <a,b>(p:Option<a>, f:(_:a) => Option<b>) : Option<b> => map_Option(Fun(f)).then(OptionMonad.join())(p)
+
+
+const maybeAdd = (x:Option<number>, y:Option<number>) : Option<number> =>
+  x.then(x_v =>
+    y.then(y_v => 
+      Option.Default.Full(x_v + y_v)
+      )
+    )
+  
