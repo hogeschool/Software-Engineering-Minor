@@ -109,7 +109,7 @@ const full = <a>(content:a) : Option<a> => ({ kind:"full", content:[...] })
 
 Given type `type Either<a,b> = ({ kind:"left", content:a } | { kind:"right", content:b })`, complete the following definition:
 ```ts
-type Option<a> = Either<a,null>
+type Option<a> = Either<a,[...]>
 ```
 
 # Defining monoids

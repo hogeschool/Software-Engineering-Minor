@@ -11,6 +11,7 @@ const Fun = (actual) => {
     };
     return f;
 };
+const apply = () => Fun(([f, a]) => f(a));
 const Updater = Fun;
 const id = () => Fun(x => x);
 const Person = {
@@ -103,3 +104,25 @@ const OptionMonad = {
 };
 const then_Option = (p, f) => map_Option(Fun(f)).then(OptionMonad.join())(p);
 const maybeAdd = (x, y) => x.then(x_v => y.then(y_v => Option.Default.Full(x_v + y_v)));
+const State = (actual) => {
+    const tmp = actual;
+    tmp.then_State = function (f) {
+        return then_State(this, f);
+    };
+    return tmp;
+};
+let map_State = (f) => Fun(p0 => State(p0.then(map2_Pair(f, id()))));
+const StateMonad = () => ({
+    unit: () => Fun(a => State(Fun(s0 => [a, s0]))),
+    join: () => Fun(p_p => State(p_p.then(apply()))),
+    getState: () => State(Fun(s0 => [s0, s0])),
+    setState: (newState) => State(Fun(_ => [{}, newState])),
+    updateState: (stateUpdater) => State(Fun(s0 => [{}, stateUpdater(s0)])),
+});
+const then_State = (p, f) => map_State(Fun(f)).then(StateMonad().join())(p);
+const Ins = Object.assign(Object.assign({}, StateMonad()), { getVar: (k) => Ins.getState().then_State(current => Ins.unit()(current[k])), setVar: (k, v) => Ins.updateState(current => (Object.assign(Object.assign({}, current), { [k]: v }))) });
+// Ins.updateState(currentState => ({...currentState, a:currentState.a+1})).then_State(() => 
+//   Ins.updateState(currentState => ({...currentState, b:currentState.b+1}))
+// )
+const myProgram1 = Ins.getVar("a").then_State(a => Ins.setVar("a", a + 1).then_State(() => Ins.getVar("c").then_State(c => Ins.getVar("d").then_State(d => Ins.setVar("c", c + d)))));
+console.log(myProgram1({ a: 0, b: 0, c: "c", d: "d" }));

@@ -14,6 +14,8 @@ const Fun = <input,output>(actual:(_:input) => output) : Fun<input,output> => {
   return f
 }
 
+const apply = <a,b>() : Fun<Pair<Fun<a,b>,a>, b> => Fun(([f,a]) => f(a))
+
 type Updater<s> = Fun<s,s>
 const Updater = Fun
 
@@ -317,3 +319,59 @@ const maybeAdd = (x:Option<number>, y:Option<number>) : Option<number> =>
       )
     )
   
+
+type State<s,a> = Fun<s,Pair<a,s>> & { then_State:<b>(f:(_:a) => State<s,b>) => State<s,b> }
+const State = <s,a>(actual: Fun<s,Pair<a,s>>) : State<s,a> => {
+  const tmp = actual as State<s,a>
+  tmp.then_State = function <b>(this:State<s,a>, f:(_:a) => State<s,b>) : State<s,b> {
+    return then_State(this, f)
+  } 
+  return tmp
+}
+
+let map_State = <s,a,b>(f:Fun<a,b>) : Fun<State<s,a>, State<s,b>> =>
+  Fun(p0 => State(p0.then(map2_Pair(f, id<s>()))))
+
+const StateMonad = <s>() => ({
+  unit:<a>() : Fun<Id<a>, State<s,a>> => Fun(a => State(Fun(s0 => [a,s0]))),
+  join:<a>() : Fun<State<s,State<s,a>>, State<s,a>> => Fun(p_p => State(p_p.then(apply<s,Pair<a,s>>()))),
+  getState:() : State<s,s> => State(Fun(s0 => [s0,s0])),
+  setState:(newState:s) : State<s,Unit> => State(Fun(_ => [{},newState])),
+  updateState:(stateUpdater:(_:s) => s) : State<s,Unit> => State(Fun(s0 => [{},stateUpdater(s0)])),
+})
+
+const then_State = <s,a,b>(p:State<s,a>, f:(_:a) => State<s,b>) : State<s,b> => map_State<s,a,State<s,b>>(Fun(f)).then(StateMonad<s>().join<b>())(p)
+
+type Memory = {
+  a:number,
+  b:number,
+  c:string,
+  d:string,
+}
+
+type Instruction<a> = State<Memory,a>
+const Ins = {
+  ...StateMonad<Memory>(),
+  getVar:<k extends keyof Memory>(k:k) : Instruction<Memory[k]> => 
+    Ins.getState().then_State(current => Ins.unit<Memory[k]>()(current[k])),
+  setVar:<k extends keyof Memory>(k:k, v:Memory[k]) : Instruction<Unit> => 
+    Ins.updateState(current => ({...current, [k]:v}))
+}
+
+
+// Ins.updateState(currentState => ({...currentState, a:currentState.a+1})).then_State(() => 
+//   Ins.updateState(currentState => ({...currentState, b:currentState.b+1}))
+// )
+
+const myProgram1 = 
+  Ins.getVar("a").then_State(a => 
+    Ins.setVar("a", a + 1).then_State(() =>
+      Ins.getVar("c").then_State(c => 
+        Ins.getVar("d").then_State(d => 
+          Ins.setVar("c", c + d)
+          )
+        )
+      )
+    )
+
+console.log(myProgram1({ a:0, b:0, c:"c", d:"d" }))
