@@ -1650,6 +1650,177 @@ Interruptible processes are an old and powerful concept, known by many names.
 
 The core idea of coroutines is that running the process will result in either of three possible outcomes: a result, an error, or an interruption. We already know how to handle results and errors, but interruptions are a new concept. An interruption gives us an insight in the state of the coroutine so far, but also tells us how we could resume execution in order to move further towards the completion of the process. This "rest of the process" is quite easily represented as a process itself. This leads us to the following definition:
 
+```ts
+type DeltaT = number
+type Coroutine<context, state, result> = {
+  ([context, deltaT]: [context, DeltaT]): CoroutineStep<context, state, result>,
+  then: <newResult>(f: (_: result) => Coroutine<context, state, newResult>) => Coroutine<context, state, newResult>,
+}
+
+const thenMaybe = <s>(f:Updater<s> | undefined, g:Updater<s> | undefined) => 
+  f != undefined && g != undefined ? f.then(g)
+  : f != undefined ? f : g
+
+const Coroutine = <context, state>() => ({
+  Default: <result>(actual: (_: [context, DeltaT]) => CoroutineStep<context, state, result>): Coroutine<context, state, result> => {
+    const co = actual as Coroutine<context, state, result>
+    co.then = function <newResult>(this: Coroutine<context, state, result>, f: (_: result) => Coroutine<context, state, newResult>): Coroutine<context, state, newResult> {
+      return Coroutine<context, state>().then(this, f)
+    }
+    return co
+  },
+  map: <result, newResult>(f: Fun<result, newResult>): Fun<Coroutine<context, state, result>, Coroutine<context, state, newResult>> =>
+    Fun(_ =>
+      Coroutine<context, state>().Default(
+        Fun(_).then(CoroutineStep<context, state>().map<result, newResult>(f)))
+    ),
+  unit: <result>(result: result): Coroutine<context, state, result> =>
+    Coroutine<context, state>().Default(_ => CoroutineStep<context, state>().Default.result(result, undefined)),
+  wait: (msLeft: DeltaT): Coroutine<context, state, Unit> =>
+    Coroutine<context, state>().Default(() => 
+      CoroutineStep<context, state>().Default.waiting(msLeft, Coroutine<context, state>().unit({}), undefined)),
+  suspend: (): Coroutine<context, state, Unit> =>
+    Coroutine<context, state>().Default(_ => CoroutineStep<context, state>().Default.suspended(Coroutine<context, state>().unit({}), undefined)),
+  setState: (nextState: Updater<state>): Coroutine<context, state, Unit> =>
+    Coroutine<context, state>().Default(_ => CoroutineStep<context, state>().Default.result({}, nextState)),
+  getContext: (): Coroutine<context, state, context> =>
+    Coroutine<context, state>().Default(_ => CoroutineStep<context, state>().Default.result(_[0], undefined)),
+  join: <result>() => Fun<Coroutine<context, state, Coroutine<context, state, result>>, Coroutine<context, state, result>>(
+    np => Coroutine<context, state>().Default(Fun(([context, deltaT]): CoroutineStep<context, state, result> => {
+      const tmp1 = np([context, deltaT])
+      if (tmp1.kind == "result") {
+        const tmp2 = tmp1.result([context, deltaT])
+        const newState = thenMaybe(tmp1.newState, tmp2.newState)
+        return { ...tmp2, newState: newState }
+      } else if (tmp1.kind == "waiting") {
+        const nextJoined = Coroutine<context, state>().join<result>()(tmp1.next)
+        return CoroutineStep<context, state>().Default.waiting(tmp1.msLeft, nextJoined, tmp1.newState)
+      } else {
+        const nextJoined = Coroutine<context, state>().join<result>()(tmp1.next)
+        return CoroutineStep<context, state>().Default.suspended(nextJoined, tmp1.newState)
+      }
+    }))
+  ),
+  then: <a, b>(p: Coroutine<context, state, a>, f: (_: a) => Coroutine<context, state, b>): Coroutine<context, state, b> =>
+    // p == Co.wait(30)
+    // f == () => Co.setState(Memory.b(incr))
+    Coroutine<context, state>().map(Fun(f)).then(Coroutine<context, state>().join())(p),
+  seq: <a>(ps:Array<Coroutine<context,state,a>>) : Coroutine<context,state,Unit> => 
+    ps.length == 0 ? Coroutine<context,state>().unit({})
+    : ps[0].then(() => Coroutine<context,state>().seq(ps.slice(1))),
+  any:<a>(ps:Array<Coroutine<context,state,a>>) : Coroutine<context,state,a> => 
+    Coroutine<context,state>().Default(([context,deltaT]) => {
+      const newPs:Array<Coroutine<context,state,a>> = []
+      let newState:Updater<state> | undefined = undefined
+      for(const p of ps) {
+        const step = p([context, deltaT])
+        newState = thenMaybe(newState, step.newState)
+        if (step.kind == "result") {
+          return CoroutineStep<context, state>().Default.result(step.result, newState)
+        } else if (step.kind == "waiting" && step.msLeft > deltaT) {
+          newPs.push(Coroutine<context,state>().wait(step.msLeft - deltaT).then(() => step.next))
+        } else if (step.kind == "waiting" && step.msLeft == deltaT) {
+          newPs.push(Coroutine<context,state>().suspend().then(() => step.next))
+        } else {
+          newPs.push(step.next)
+        }
+      }
+      return CoroutineStep<context,state>().Default.suspended(Coroutine<context,state>().any(newPs), newState)
+    }),
+  repeat:<a>(p:() => Coroutine<context,state,a>) : Coroutine<context,state,Unit> => {
+    return p().then(() => Coroutine<context,state>().suspend().then(() => Coroutine<context,state>().repeat(p)))
+  }
+})
+
+
+type CoroutineStep<context, state, result> = {
+  newState: Updater<state> | undefined, // == id<state>()
+} & ({
+  kind: "result", result: result
+} | {
+  kind: "waiting", msLeft: number, next: Coroutine<context, state, result>
+} | {
+  kind: "suspended", next: Coroutine<context, state, result>
+})
+
+const CoroutineStep = <context, state>() => ({
+  Default: {
+    result: <result>(result: result, newState: Updater<state> | undefined): CoroutineStep<context, state, result> =>
+      ({ kind: "result", result, newState }),
+    suspended: <result>(next: Coroutine<context, state, result>, newState: Updater<state> | undefined): CoroutineStep<context, state, result> =>
+      ({ kind: "suspended", newState, next }),
+    waiting: <result>(msLeft: number, next: Coroutine<context, state, result>, newState: Updater<state> | undefined): CoroutineStep<context, state, result> =>
+      ({ kind: "waiting", msLeft, newState, next }),
+  },
+  map: <result, newResult>(f: Fun<result, newResult>): Fun<CoroutineStep<context, state, result>, CoroutineStep<context, state, newResult>> =>
+    Fun(_ =>
+      _.kind == "result" ? CoroutineStep<context, state>().Default.result(f(_.result), _.newState)
+        : _.kind == "suspended" ? CoroutineStep<context, state>().Default.suspended(Coroutine<context, state>().map(f)(_.next), _.newState)
+          : CoroutineStep<context, state>().Default.waiting(_.msLeft, Coroutine<context, state>().map(f)(_.next), _.newState)
+    )
+})
+
+type Context = Memory & { authenticationHeaders:string }
+const Co = Coroutine<Context, Memory>()
+
+const incrANTimes = (n:number) : Coroutine<Context, Memory, Unit> =>
+  n <= 0 ? Co.unit({})
+  : 
+    Co.seq([
+      Co.setState(Memory.a(incr)),
+      Co.wait(10),
+      incrANTimes(n-1)
+    ])
+
+let p =
+Co.seq([
+  Co.any([
+    Co.repeat(() =>
+      Co.seq([
+        Co.setState(Memory.a(incr)),
+        Co.wait(10),
+      ])
+    ),
+    Co.seq([
+      Co.setState(Memory.b(incr)),
+      Co.wait(110)
+    ])
+  ]),
+    // Co.getContext().then(context =>
+    //   context.a < 5 ?
+    //     Co.wait(30 * context.a)
+    //   : Co.unit({})
+    // ),
+    // Co.setState(Memory.b(incr)),
+    // Co.wait(30),
+    // Co.setState(Memory.a(incr))
+  ])
+
+
+let currentMemory: Memory = { a: 0, b: 0, c: "c", d: "d" }
+let deltaT = 1
+let running = true
+do {
+  console.log("about to run an iteration", currentMemory)
+  const step = p([{...currentMemory, authenticationHeaders:"blah blah super secure"}, deltaT])
+  if (step.newState != undefined)
+    currentMemory = step.newState(currentMemory)
+  if (step.kind == "waiting") {
+    if (step.msLeft <= deltaT) {
+      p = step.next
+    } else {
+      const next = step.next
+      p = Co.wait(step.msLeft - deltaT).then(() => next)
+    }
+  } else if (step.kind == "suspended") {
+    p = step.next
+  } else {
+    running = false
+  }
+  console.log("iteration finished with", step, currentMemory)
+} while (running)
+```
+
 ```
 type Coroutine<s,e,a> = Fun<s, Either<NoRes<s,e,a>,Pair<a,s>>>
 type NoRes<s,e,a> = Either<e,Continuation<s,e,a>>
@@ -1799,3 +1970,222 @@ run_animation(draw_animation())
 ```
 
 Note how the code has become linear, and is quite readable. Moreover, the code contains very little unnecessary technical details. Most of the words are actually carrying a lot of meaning, related to the problem and its solution, and is not just machinery for the sake of machinery. By striving towards elegance and expressive power, we can let our creative power roam free and soar to heights previously undreamed of. And this is the power, and beauty, of programming.
+
+
+
+# Widget
+
+```tsx
+export interface Widget<o> {
+  run: (on_done: (output: o) => void) => JSX.Element;
+  /** Wraps the `JSX.Element` of the internal widget in some extra markup.
+   * This is a visual decorator only.
+   * This has no impact on the data flow.
+   *
+   * e.g.
+   * ```javascript
+   * w.wrapHTML(w => <div>{w}</div>)
+   * ```
+   * *
+   * The given `JSX.Element` *must* appear in the returned value, otherwise
+   * the widget will, effectively, stop working and producing data.
+   *
+   * e.g. that will cause a lot of issues and damage because we have killed the
+   * widget in a misguided attempt to make it pretty
+   * ```javascript
+   * w.wrapHTML(w => <div></div>)
+   * ```
+   */
+  wrapHTML: (f: BasicUpdater<JSX.Element>) => Widget<o>;
+
+  /** Maps the data output value of the Widget,
+   * @param f The function has only access to the output result `o2` and based on its value can replace with a new result `o2`.
+   * The function `f` however cannot alter the Widget/control/visual flow and replace it with a new widget or nothing inside there.
+   */
+  map: <o2>(f: BasicFun<o, o2>) => Widget<o2>;
+
+  /** Forces a widget to fake any arbitrary output, by **never** returning it. */
+  never: <o2>() => Widget<o2>;
+}
+/** Creates a widget from a cont -> JSX.Element */
+
+export const fromJSX = <o,>(
+  w: (cont: (_: o) => void) => JSX.Element
+): Widget<o> => ({
+  run: w,
+  wrapHTML: function (f: BasicUpdater<JSX.Element>) {
+    return wrapHTML<o>(f)(this);
+  },
+  map: function <o2>(f: BasicFun<o, o2>) {
+    return map(f)(this);
+  },
+  never: function <_>(): Widget<_> {
+    return never(this);
+  },
+});
+/** A widget that depends on some input. */
+
+export type IOWidget<i, o> = BasicFun<i, Widget<o>>;
+
+export const nothing = <o,>(): Widget<o> => fromJSX((_) => <></>);
+const never = <o, _>(inner_widget: Widget<_>): Widget<o> =>
+  fromJSX((_: (output: o) => void) => inner_widget.run((_) => {}));
+
+export const wrapHTML =
+  <a,>(wrap: BasicUpdater<JSX.Element>): BasicUpdater<Widget<a>> =>
+  (widget_a) =>
+    fromJSX((on_done: (output: a) => void) =>
+      wrap(widget_a.run((res_a) => on_done(res_a)))
+    );
+
+export const map =
+  <a, b>(f: BasicFun<a, b>): BasicFun<Widget<a>, Widget<b>> =>
+  (widget_a) =>
+    fromJSX((on_done_b: (output_b: b) => void) =>
+      widget_a.run((res_a) => on_done_b(f(res_a)))
+    );
+
+export const any = <o,>(widgets: Widget<o>[], options?: Options): Widget<o> =>
+  fromJSX((setState) => (
+    <Any key={options?.key} widgets={widgets} setState={setState} />
+  ));
+
+export const Any = <o,>(props: {
+  widgets: Widget<o>[];
+  setState: (_: o) => void;
+}) => <>{props.widgets.map((w) => w.run(props.setState))}</>;
+
+```
+
+
+
+
+## From coroutines to widgets
+
+```tsx
+import React from "react";
+
+import { Coroutine } from "../../Coroutines/Coroutine";
+import { SharedLayoutConstants } from "../../Layout/SharedLayoutConstants";
+import {
+  BasicFun as BasicFun,
+  BasicUpdater as BasicUpdater,
+  Unit,
+  Updater,
+} from "../basics/fun";
+import { fromJSX, IOWidget } from "../basics/widget";
+
+type CoroutineComponentOptions = {
+  interval?: number;
+  key?: string;
+  restartWhenFinished?: boolean;
+};
+const Co = Coroutine;
+export const coroutine =
+  <context, state, events>(
+    initialCoroutine: Coroutine<context, state, events, Unit>,
+    events: events[],
+    options?: CoroutineComponentOptions
+  ): IOWidget<context, Updater<state>> =>
+  (currentContext) =>
+    fromJSX((setState) => {
+      return (
+        <CoroutineComponent
+          key={options?.key}
+          options={options}
+          currentContext={currentContext}
+          setState={(_) => setState(Updater(_))}
+          initialCoroutine={initialCoroutine}
+          events={events}
+        />
+      );
+    });
+
+type CoroutineComponentProps<context, state, events> = {
+  initialCoroutine: Coroutine<context, state, events, Unit>;
+  currentContext: context;
+  events: events[];
+  setState: BasicFun<BasicUpdater<state>, void>;
+  options?: CoroutineComponentOptions;
+};
+type CoroutineComponentState<context, state, events> = {
+  currentCoroutine: Coroutine<context, state, events, Unit>;
+};
+class CoroutineComponent<context, state, events> extends React.Component<
+  CoroutineComponentProps<context, state, events>,
+  CoroutineComponentState<context, state, events>
+> {
+  constructor(props: CoroutineComponentProps<context, state, events>) {
+    super(props);
+    this.state = { currentCoroutine: props.initialCoroutine };
+  }
+
+  running = false;
+  animationFrameId?: NodeJS.Timer = undefined;
+  componentDidMount(): void {
+    let lastTimestamp = Date.now();
+    this.running = true;
+    const tick = () => {
+      if (!this.running) {
+        clearInterval(this.animationFrameId);
+        return;
+      }
+      const currTimestamp = Date.now();
+      const step = Co.Tick(
+        this.props.currentContext,
+        this.props.events,
+        this.state.currentCoroutine,
+        currTimestamp - lastTimestamp
+      );
+      if (SharedLayoutConstants.LogCoroutineTicks)
+        console.log("co::ticking, deltaT = ", currTimestamp - lastTimestamp);
+      lastTimestamp = currTimestamp;
+      if (!this.running) return;
+      if (step.kind == "done") {
+        this.setState(
+          (s) => ({
+            ...s,
+            currentCoroutine: !!this.props.options?.restartWhenFinished
+              ? this.props.initialCoroutine
+              : Co.Nothing(),
+          }),
+          () =>
+            step.state && this.running
+              ? this.props.setState(step.state)
+              : undefined
+        );
+      } else {
+        this.setState(
+          (s) => ({ ...s, currentCoroutine: step.next }),
+          () =>
+            step.state && this.running
+              ? this.props.setState(Updater(step.state))
+              : undefined
+        );
+      }
+      // if (this.running)
+      //   this.animationFrameId = setTimeout(
+      //     tick,
+      //     this.props.options?.interval || 250
+      //   );
+    };
+    this.animationFrameId = setInterval(
+      tick,
+      this.props.options?.interval || 250
+    );
+  }
+
+  componentWillUnmount(): void {
+    this.running = false;
+    clearInterval(this.animationFrameId);
+  }
+
+  shouldComponentUpdate(): boolean {
+    return false;
+  }
+
+  render() {
+    return <></>;
+  }
+}
+```

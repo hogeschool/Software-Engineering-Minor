@@ -450,18 +450,21 @@ const Coroutine = <context, state>() => ({
         newState = thenMaybe(newState, step.newState)
         if (step.kind == "result") {
           return CoroutineStep<context, state>().Default.result(step.result, newState)
+        } else if (step.kind == "waiting" && step.msLeft > deltaT) {
+          newPs.push(Coroutine<context,state>().wait(step.msLeft - deltaT).then(() => step.next))
+        } else if (step.kind == "waiting") {
+          newPs.push(step.next)
+          // newPs.push(Coroutine<context,state>().suspend().then(() => step.next))
         } else {
           newPs.push(step.next)
         }
       }
       return CoroutineStep<context,state>().Default.suspended(Coroutine<context,state>().any(newPs), newState)
     }),
-  repeat:() => (p:Coroutine<context,state,Unit>) : Coroutine<context,state,Unit> => 
-    Coroutine<context,state>().seq([
-      p,
-      Coroutine<context,state>().suspend(),
-      Coroutine<context,state>().repeat()(p)
-    ])
+  repeat:(p:() => Coroutine<context,state,Unit>) : Coroutine<context,state,Unit> => 
+    p().then(() => 
+      Coroutine<context,state>().repeat(p)
+    )
 })
 
 
@@ -493,32 +496,52 @@ const CoroutineStep = <context, state>() => ({
 })
 
 type Context = Memory & { authenticationHeaders:string }
-const Co = Coroutine<Context, Memory>()
+type Co<result> = Coroutine<Context, Memory, result>
+const Co = Coroutine<Context, Memory>()  
+
 let p =
   Co.seq([
     Co.any([
-      Co.seq([
-        Co.setState(Memory.a(incr)),
-        Co.wait(10)
-      ]),
+      Co.repeat(() => 
+        Co.seq([
+          Co.setState(Memory.a(incr)),
+          Co.wait(10)
+        ])
+      ),
       Co.seq([
         Co.setState(Memory.b(incr)),
-        Co.wait(10)
+        Co.wait(50),
+        Co.setState(Memory.b(incr)),
+        Co.wait(50),
+        Co.setState(Memory.b(incr)),
       ])
     ]),
-    Co.getContext().then(context =>
-      context.a < 5 ?
-        Co.wait(30 * context.a)
-      : Co.unit({})
-    ),
-    Co.setState(Memory.b(incr)),
-    Co.wait(30),
-    Co.setState(Memory.a(incr))
+    Co.setState(Memory.a(incr).then(Memory.b(incr))),
   ])
+  // Co.seq([
+  //   Co.any([
+  //     Co.seq([
+  //       Co.setState(Memory.a(incr)),
+  //       Co.wait(10)
+  //     ]),
+  //     Co.seq([
+  //       Co.setState(Memory.b(incr)),
+  //       Co.wait(10)
+  //     ])
+  //   ]),
+  //   Co.getContext().then(context =>
+  //     context.a < 5 ?
+  //       Co.wait(30 * context.a)
+  //     : Co.unit({})
+  //   ),
+  //   Co.setState(Memory.b(incr)),
+  //   Co.wait(30),
+  //   Co.setState(Memory.a(incr))
+  // ])
 
 
 let currentMemory: Memory = { a: 0, b: 0, c: "c", d: "d" }
-let deltaT = 10
+let deltaT = 1
 let running = true
 do {
   console.log("about to run an iteration", currentMemory)
