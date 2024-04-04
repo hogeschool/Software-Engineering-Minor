@@ -5,7 +5,6 @@ Write a Fun<number,number> which multiplies the input by three.
 Write a Fun<[number,number],number> which performs a sum.
 Write a Fun<[boolean,boolean],boolean> which performs a logical and.
 
-
 # Typing simple functions.
 What is the type of Fun(x => x + 1)?
 What is the type of Fun(x => x > 0)?
@@ -26,9 +25,9 @@ What is the type of gtz.then(not)?
 
 # Invoking a map function. 
 What is the value of mapId(incr)(id(10))?
-What is the value of mapArray(gtz)([1,2,3,4])?
-What is the value of mapOption(f)(empty())?
-What is the value of mapOption(gtz)(full(-5))?
+What is the value of mapArray(gtz)([1,-2,3,-4])?
+What is the value of mapOption(f)(Option.Default.empty())?
+What is the value of mapOption(gtz)(Option.Default.full(-5))?
 
 # Typing map functions.
 What is the type of mapId(incr)?
@@ -46,10 +45,13 @@ What is the type of mapOption(mapOption(incr))?
 What is the type of mapOption(mapList(gtz))?
 What is the type of mapCountainer(mapOption(mapList(gtz)))?
 
+# Typing map functions over compositions.
+What is the type of mapArray(incr.then(gtz))?
+What is the type of mapOption(mapOption(gtz.then(not)))?
+What is the type of mapOption(mapList(incr.then(double)))?
+
 <!-- # Invoking composed map functions
 Invoking a map function with f.then(g)
-Invoking map functions with composed functions.
-Invoking composed map functions with composed functions.
 Invoking monoid operations.
 Invoking functor units.
 Invoking functor joins.
@@ -78,8 +80,9 @@ function Fun< input, output >( implementation:(input:input) => output ) : Fun< i
 # Defining functors
 Complete the definition of the following `map` function:
 ```ts
-const mapId = <a,b>(f:Fun<a,b>) : Fun<Id<a>, Id<b>> => f.[...](Fun(id))
+const mapId = <a,b>(f:Fun<a,b>) : Fun<Id<a>, Id<b>> => [...]
 ```
+
 Complete the definition of the following `map` function:
 ```ts
 const mapArray = <a,b>(f:Fun<a,b>) : Fun<[...]> => Fun(inputArray => inputArray.map(f))
@@ -90,6 +93,7 @@ Complete the definition of the following `map` function:
 const mapCountainer = <a,b>(f:Fun<a,b>) : Fun<Countainer<a>, Countainer<b>> =>
   Fun(inputCountainer => ({...inputCountainer, content:[...]}))
 ```
+
 Complete the definition of the following `map` function:
 ```ts
 const mapOption = <a,b>(f:Fun<a,b>) : Fun<Option<a>, Option<b>> =>
@@ -182,4 +186,66 @@ class ProcessFunctor {
     return Fun(s => [s,unstructuredValue])
   }
 }
+```
+
+
+# Advanced monads and functors
+Complete the following definition:
+```tsx
+import React from "react";
+
+export type Widget<o> = {
+  run: (onOutput: (_: o) => void) => JSX.Element;
+  map: [...];
+  wrapHTML: (f: (_: JSX.Element) => JSX.Element) => Widget<o>;
+};
+
+export const Widget = {
+  Default: <o,>(actual: (onOutput: (_: o) => void) => JSX.Element): Widget<o> => ({
+    run: actual,
+    map: function <o2>(this: Widget<o>, f: (_: o) => o2): Widget<o2> {
+            return [...]
+        );
+      },
+    wrapHTML: function (this: Widget<o>, f: (_: JSX.Element) => JSX.Element): Widget<o> {
+        return Widget.Default(onOutput => f(this.run(onOutput))
+      );
+    }
+  }),
+  any: <o,>(ws: Array<Widget<o>>): Widget<o> => 
+    Widget.Default<o>(onOutput => 
+      <>{
+        ws.map(w => w.run(onOutput))
+      }</>
+    )
+};
+```
+
+
+Complete the following type definitions
+```ts
+export type Coroutine<context, state, events, result> = {
+  ([context, deltaT, events]: [context, DeltaT, Array<events>]): CoroutineStep<
+    context,
+    state,
+    events,
+    result
+  >;
+
+export type CoroutineStep<context, state, events, result> = {
+  newState: BasicUpdater<state> | undefined;
+} & (
+  | { kind: "result"; [...] }
+  | {
+      kind: "then";
+      p: Coroutine<context, state, events, any>;
+      k: BasicFun<any, Coroutine<context, state, events, result>>;
+    }
+  | { kind: "yield"; next: [...] }
+  | {
+      kind: "waiting";
+      msLeft: number;
+      next: [...];
+    }
+)
 ```
