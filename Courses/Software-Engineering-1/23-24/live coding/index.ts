@@ -352,6 +352,7 @@ type Memory = {
   d: string,
 }
 const Memory = {
+  Default:({ a:0, b:0, c:"c", d:"d" }),
   a: (_: Updater<Memory["a"]>): Updater<Memory> => Fun(current => ({ ...current, a: _(current.a) })),
   b: (_: Updater<Memory["b"]>): Updater<Memory> => Fun(current => ({ ...current, b: _(current.b) })),
   c: (_: Updater<Memory["c"]>): Updater<Memory> => Fun(current => ({ ...current, c: _(current.c) })),
@@ -386,179 +387,126 @@ const myProgram1 =
 // console.log(myProgram1({ a:0, b:0, c:"c", d:"d" }))
 
 type DeltaT = number
-type Coroutine<context, state, result> = {
-  ([context, deltaT]: [context, DeltaT]): CoroutineStep<context, state, result>,
-  then: <newResult>(f: (_: result) => Coroutine<context, state, newResult>) => Coroutine<context, state, newResult>,
+type Coroutine<c,s,a> = {
+  ([context, deltaT]:[c & s,DeltaT]) : CoroutineStep<c,s,a>,
+  then:<b>(k:(_:a) => Coroutine<c,s,b>) => Coroutine<c,s,b>,
 }
+type CoroutineStep<c,s,a> = (
+  | { kind:"result", value:a } 
+  | { kind:"suspend", next:Coroutine<c,s,a> }
+  | { kind:"waiting", msLeft:DeltaT, next:Coroutine<c,s,a> }
+) & { updateState:Option<Updater<s>> }
 
-const thenMaybe = <s>(f:Updater<s> | undefined, g:Updater<s> | undefined) => 
-  f != undefined && g != undefined ? f.then(g)
-  : f != undefined ? f : g
-
-const Coroutine = <context, state>() => ({
-  Default: <result>(actual: (_: [context, DeltaT]) => CoroutineStep<context, state, result>): Coroutine<context, state, result> => {
-    const co = actual as Coroutine<context, state, result>
-    co.then = function <newResult>(this: Coroutine<context, state, result>, f: (_: result) => Coroutine<context, state, newResult>): Coroutine<context, state, newResult> {
-      return Coroutine<context, state>().then(this, f)
-    }
-    return co
+const thenMaybe = <s>(f:Option<Updater<s>>, g:Option<Updater<s>>) : Option<Updater<s>> =>
+  f.kind == "full" && g.kind == "full" ? Option.Default.Full(f.content.then(g.content))
+  : f.kind == "full" ? f : g
+  
+const Coroutine = <c,s>() => ({
+  // constructors
+  Default:<a>(actual:([context, deltaT]:[c & s,DeltaT]) => CoroutineStep<c,s,a>) : Coroutine<c,s,a> => {
+    const result = actual as Coroutine<c,s,a>
+    result.then = function<b>(this:Coroutine<c,s,a>, k:(_:a) => Coroutine<c,s,b>) : Coroutine<c,s,b> { return Coroutine<c,s>().then(this, Fun(k)) }
+    return result
   },
-  map: <result, newResult>(f: Fun<result, newResult>): Fun<Coroutine<context, state, result>, Coroutine<context, state, newResult>> =>
-    Fun(_ =>
-      Coroutine<context, state>().Default(
-        Fun(_).then(CoroutineStep<context, state>().map<result, newResult>(f)))
-    ),
-  unit: <result>(result: result): Coroutine<context, state, result> =>
-    Coroutine<context, state>().Default(_ => CoroutineStep<context, state>().Default.result(result, undefined)),
-  wait: (msLeft: DeltaT): Coroutine<context, state, Unit> =>
-    Coroutine<context, state>().Default(_ => CoroutineStep<context, state>().Default.waiting(msLeft, Coroutine<context, state>().unit({}), undefined)),
-  suspend: (): Coroutine<context, state, Unit> =>
-    Coroutine<context, state>().Default(_ => CoroutineStep<context, state>().Default.suspended(Coroutine<context, state>().unit({}), undefined)),
-  setState: (nextState: Updater<state>): Coroutine<context, state, Unit> =>
-    Coroutine<context, state>().Default(_ => CoroutineStep<context, state>().Default.result({}, nextState)),
-  getContext: (): Coroutine<context, state, context> =>
-    Coroutine<context, state>().Default(_ => CoroutineStep<context, state>().Default.result(_[0], undefined)),
-  join: <result>() => Fun<Coroutine<context, state, Coroutine<context, state, result>>, Coroutine<context, state, result>>(
-    np => Coroutine<context, state>().Default(Fun(([context, deltaT]): CoroutineStep<context, state, result> => {
-      const tmp1 = np([context, deltaT])
-      if (tmp1.kind == "result") {
-        const tmp2 = tmp1.result([context, deltaT])
-        const newState = thenMaybe(tmp1.newState, tmp2.newState)
-        return { ...tmp2, newState: newState }
-      } else if (tmp1.kind == "waiting") {
-        const nextJoined = Coroutine<context, state>().join<result>()(tmp1.next)
-        return CoroutineStep<context, state>().Default.waiting(tmp1.msLeft, nextJoined, tmp1.newState)
-      } else {
-        const nextJoined = Coroutine<context, state>().join<result>()(tmp1.next)
-        return CoroutineStep<context, state>().Default.suspended(nextJoined, tmp1.newState)
-      }
-    }))
-  ),
-  then: <a, b>(p: Coroutine<context, state, a>, f: (_: a) => Coroutine<context, state, b>): Coroutine<context, state, b> =>
-    // p == Co.wait(30)
-    // f == () => Co.setState(Memory.b(incr))
-    Coroutine<context, state>().map(Fun(f)).then(Coroutine<context, state>().join())(p),
-  seq: <a>(ps:Array<Coroutine<context,state,a>>) : Coroutine<context,state,Unit> => 
-    ps.length == 0 ? Coroutine<context,state>().unit({})
-    : ps[0].then(() => Coroutine<context,state>().seq(ps.slice(1))),
-  any:<a>(ps:Array<Coroutine<context,state,a>>) : Coroutine<context,state,a> => 
-    Coroutine<context,state>().Default(([context,deltaT]) => {
-      const newPs:Array<Coroutine<context,state,a>> = []
-      let newState:Updater<state> | undefined = undefined
-      for(const p of ps) {
-        const step = p([context, deltaT])
-        newState = thenMaybe(newState, step.newState)
-        if (step.kind == "result") {
-          return CoroutineStep<context, state>().Default.result(step.result, newState)
-        } else if (step.kind == "waiting" && step.msLeft > deltaT) {
-          newPs.push(Coroutine<context,state>().wait(step.msLeft - deltaT).then(() => step.next))
-        } else if (step.kind == "waiting") {
-          newPs.push(step.next)
-          // newPs.push(Coroutine<context,state>().suspend().then(() => step.next))
-        } else {
-          newPs.push(step.next)
+  Result:<a>(value:a) : Coroutine<c,s,a> => Coroutine<c,s>().Default((_) => CoroutineStep<c,s>().Result(value)),
+  Suspend:() : Coroutine<c,s,Unit> => Coroutine<c,s>().Default((_) => CoroutineStep<c,s>().Suspend(Coroutine<c,s>().Result({}))),
+  Wait:(msLeft:DeltaT) : Coroutine<c,s,Unit> => Coroutine<c,s>().Default((_) => CoroutineStep<c,s>().Wait(msLeft, Coroutine<c,s>().Result({}))),
+  GetState:() : Coroutine<c,s,c & s> => Coroutine<c,s>().Default(([context, deltaT]) => CoroutineStep<c,s>().Result(context)),
+  SetState:(updateState:Updater<s>) : Coroutine<c,s,Unit> => Coroutine<c,s>().Default(([context, deltaT]) => CoroutineStep<c,s>().SetState(updateState)),
+  
+  // combinators
+  Tick:<a>(context:c & s, deltaT:number, p:Coroutine<c,s,a>) : ({ kind:"done", result:a } | { kind:"continuing", next:Coroutine<c,s,a> }) & { updateState:Option<Updater<s>> } => {
+    const step = p([context, deltaT])
+    if (step.kind == "result") {
+      return { kind:"done", result:step.value, updateState:step.updateState }
+    } else if (step.kind == "suspend") {
+      return { kind:"continuing", next:step.next, updateState:step.updateState }
+    } else {
+      if (step.msLeft <= deltaT)
+        return { kind:"continuing", next:step.next, updateState:step.updateState }
+      else
+        return { kind:"continuing", next:Coroutine<c,s>().Wait(step.msLeft - deltaT).then(() => step.next), updateState:step.updateState }
+    }
+  },
+  Seq:(ps:Array<Coroutine<c,s,Unit>>) : Coroutine<c,s,Unit> => ps.length <= 0 ? Coroutine<c,s>().Result({}) : ps[0].then(() => Coroutine<c,s>().Seq(ps.slice(1))),
+  Repeat:(p:() => Coroutine<c,s,Unit>) : Coroutine<c,s,Unit> => p().then(() => Coroutine<c,s>().Repeat(p)),
+  Any:<a>(ps:Array<Coroutine<c,s,a>>) : Coroutine<c,s,a> => {
+    return Coroutine<c,s>().Default(([context, deltaT]) => {
+
+      const ps1:Array<Coroutine<c,s,a>> = []
+      let nextState = Option.Default.Empty<Updater<s>>()
+      for (const p of ps) {
+        const step = Coroutine<c,s>().Tick(context, deltaT, p)
+        nextState = thenMaybe(nextState, step.updateState)
+        if (step.kind == "done") return { kind:"result", value:step.result, updateState:nextState }
+        else {
+          ps1.push(step.next)
         }
       }
-      return CoroutineStep<context,state>().Default.suspended(Coroutine<context,state>().any(newPs), newState)
-    }),
-  repeat:(p:() => Coroutine<context,state,Unit>) : Coroutine<context,state,Unit> => 
-    p().then(() => 
-      Coroutine<context,state>().repeat(p)
-    )
-})
-
-
-type CoroutineStep<context, state, result> = {
-  newState: Updater<state> | undefined, // == id<state>()
-} & ({
-  kind: "result", result: result
-} | {
-  kind: "waiting", msLeft: number, next: Coroutine<context, state, result>
-} | {
-  kind: "suspended", next: Coroutine<context, state, result>
-})
-
-const CoroutineStep = <context, state>() => ({
-  Default: {
-    result: <result>(result: result, newState: Updater<state> | undefined): CoroutineStep<context, state, result> =>
-      ({ kind: "result", result, newState }),
-    suspended: <result>(next: Coroutine<context, state, result>, newState: Updater<state> | undefined): CoroutineStep<context, state, result> =>
-      ({ kind: "suspended", newState, next }),
-    waiting: <result>(msLeft: number, next: Coroutine<context, state, result>, newState: Updater<state> | undefined): CoroutineStep<context, state, result> =>
-      ({ kind: "waiting", msLeft, newState, next }),
+      return { kind:"suspend", next:Coroutine<c,s>().Any(ps1), updateState:nextState }
+    })
   },
-  map: <result, newResult>(f: Fun<result, newResult>): Fun<CoroutineStep<context, state, result>, CoroutineStep<context, state, newResult>> =>
-    Fun(_ =>
-      _.kind == "result" ? CoroutineStep<context, state>().Default.result(f(_.result), _.newState)
-        : _.kind == "suspended" ? CoroutineStep<context, state>().Default.suspended(Coroutine<context, state>().map(f)(_.next), _.newState)
-          : CoroutineStep<context, state>().Default.waiting(_.msLeft, Coroutine<context, state>().map(f)(_.next), _.newState)
+
+  // functoriality and monadicity
+  map:<a,b>(f:Fun<a,b>) : Fun<Coroutine<c,s,a>, Coroutine<c,s,b>> => Fun(p => 
+    Coroutine<c,s>().Default(
+      Fun(p).then(CoroutineStep<c,s>().map(f))
     )
+  ),
+  join:<a>(pp:Coroutine<c,s,Coroutine<c,s,a>>) : Coroutine<c,s,a> => 
+    Coroutine<c,s>().Default(([context, deltaT]) => {
+      const step = pp([context, deltaT])
+      if (step.kind == "result") {
+        const step1 = step.value([context, deltaT])
+        return {...step1, updateState:thenMaybe(step.updateState, step1.updateState) }
+      } else {
+        const joinedNext = Coroutine<c,s>().join(step.next)
+        return {...step, next:joinedNext}
+      }
+    }),
+  then:<a,b>(p:Coroutine<c,s,a>, k:Fun<a, Coroutine<c,s,b>>) : Coroutine<c,s,b> =>
+    Coroutine<c,s>().join(Coroutine<c,s>().map(k)(p)),
 })
 
-type Context = Memory & { authenticationHeaders:string }
-type Co<result> = Coroutine<Context, Memory, result>
-const Co = Coroutine<Context, Memory>()  
+const CoroutineStep = <c,s>() => ({
+  SetState:(updateState:Updater<s>) : CoroutineStep<c,s,Unit> => ({ kind:"result", value:{}, updateState:Option.Default.Full(updateState) }),
+  Result:<a>(value:a) : CoroutineStep<c,s,a> => ({ kind:"result", value:value, updateState:Option.Default.Empty() }),
+  Suspend:<a>(next:Coroutine<c,s,a>) : CoroutineStep<c,s,a> => ({ kind:"suspend", next:next, updateState:Option.Default.Empty() }),
+  Wait:<a>(msLeft:DeltaT,next:Coroutine<c,s,a>) : CoroutineStep<c,s,a> => ({ kind:"waiting", next:next, msLeft:msLeft, updateState:Option.Default.Empty() }),
 
-let p =
-  Co.seq([
-    Co.any([
-      Co.repeat(() => 
-        Co.seq([
-          Co.setState(Memory.a(incr)),
-          Co.wait(10)
+  map:<a,b>(f:Fun<a,b>) : Fun<CoroutineStep<c,s,a>, CoroutineStep<c,s,b>> => Fun(cs => 
+    cs.kind == "result" ? {...cs, value:f(cs.value) }
+    : {...cs, next:Coroutine<c,s>().map(f)(cs.next) }
+  )
+})
+
+
+const Co = Coroutine<Unit, Memory>()
+
+const p = 
+  Co.Seq([
+    Co.SetState(Memory.a(incr)),
+    Co.Wait(60),
+    Co.SetState(Memory.b(incr)),
+    Co.Wait(40),
+    Co.Any([
+      Co.Repeat(() =>
+        Co.Seq([
+          Co.SetState(Memory.a(incr)),
+          Co.Wait(20),
         ])
       ),
-      Co.seq([
-        Co.setState(Memory.b(incr)),
-        Co.wait(50),
-        Co.setState(Memory.b(incr)),
-        Co.wait(50),
-        Co.setState(Memory.b(incr)),
-      ])
-    ]),
-    Co.setState(Memory.a(incr).then(Memory.b(incr))),
+      Co.Wait(200)
+    ])
   ])
-  // Co.seq([
-  //   Co.any([
-  //     Co.seq([
-  //       Co.setState(Memory.a(incr)),
-  //       Co.wait(10)
-  //     ]),
-  //     Co.seq([
-  //       Co.setState(Memory.b(incr)),
-  //       Co.wait(10)
-  //     ])
-  //   ]),
-  //   Co.getContext().then(context =>
-  //     context.a < 5 ?
-  //       Co.wait(30 * context.a)
-  //     : Co.unit({})
-  //   ),
-  //   Co.setState(Memory.b(incr)),
-  //   Co.wait(30),
-  //   Co.setState(Memory.a(incr))
-  // ])
 
+const deltaT = 10
+const run = (currentState:Memory, p:Coroutine<Unit, Memory, Unit>) : void => {
+  const step = Co.Tick(currentState, deltaT, p)
+  const nextState = (step.updateState.kind == "full" ? step.updateState.content : id<Memory>())(currentState)
+  console.log(`New state: ${JSON.stringify(nextState)}`)
+  if (step.kind == "done") return
+  return run(nextState, step.next)
+}
 
-let currentMemory: Memory = { a: 0, b: 0, c: "c", d: "d" }
-let deltaT = 1
-let running = true
-do {
-  console.log("about to run an iteration", currentMemory)
-  const step = p([{...currentMemory, authenticationHeaders:"blah blah super secure"}, deltaT])
-  if (step.newState != undefined)
-    currentMemory = step.newState(currentMemory)
-  if (step.kind == "waiting") {
-    if (step.msLeft <= deltaT) {
-      p = step.next
-    } else {
-      const next = step.next
-      p = Co.wait(step.msLeft - deltaT).then(() => next)
-    }
-  } else if (step.kind == "suspended") {
-    p = step.next
-  } else {
-    running = false
-  }
-  console.log("iteration finished with", step, currentMemory)
-} while (running)
+run(Memory.Default, p)
