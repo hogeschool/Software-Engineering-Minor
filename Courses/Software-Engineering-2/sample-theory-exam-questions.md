@@ -62,10 +62,16 @@ then
 `f x g : __ x __ => __ x __`
 
 1. Given a BCCC and two functions `f : a -> c` and `g : b -> d`
-`<f,g>;π1 : __ => __`
+`<f,g>;π1 = __`
 
 1. Given a BCCC and two functions `f : a -> c` and `g : b -> d`
 `<f,g>;π2 = __`
+
+1. Given a BCCC and two functions `f : a -> c` and `g : b -> d`
+`<f,g>;π1 : __ => __`
+
+1. Given a BCCC and two functions `f : a -> c` and `g : b -> d`
+`<f,g>;π2 : __ => __`
 
 ## Sums
 1. Given a BCCC

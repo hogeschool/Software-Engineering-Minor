@@ -159,7 +159,7 @@ class CountainerFunctor {
     return ({ content:[...], counter:[...] })
   }
   static unit<T>(unstructuredValue:T) : Countainer<T> {
-    return Countainer(unstructuredValue)
+    return Countainer.Default(unstructuredValue)
   }
 }
 ```
